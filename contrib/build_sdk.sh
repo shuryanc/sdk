@@ -1,5 +1,5 @@
 #!/usr/local/bin/bash
-test
+
 ##
  # @file contrib/build_sdk.sh
  # @brief Builds MEGA SDK static library and static examples
