@@ -19,6 +19,7 @@
  * program.
  */
 
+#include <cctype>
 #include <cwctype>
 
 #include "mega.h"
@@ -701,13 +702,17 @@ bool WinFileAccess::fopen_impl(LocalPath& namePath, bool read, bool write, bool 
 
 WinFileSystemAccess::WinFileSystemAccess()
 {
+#ifdef ENABLE_SYNC
     notifyerr = false;
     notifyfailed = false;
+#endif  // ENABLE_SYNC
 }
 
 WinFileSystemAccess::~WinFileSystemAccess()
 {
+#ifdef ENABLE_SYNC
     assert(!dirnotifys.size());
+#endif
 }
 
 bool WinFileSystemAccess::cwd(LocalPath& path) const
@@ -1299,15 +1304,11 @@ void WinFileSystemAccess::statsid(string *id) const
 #endif
 }
 
+#ifdef ENABLE_SYNC
+
 // set DirNotify's root LocalNode
 void WinDirNotify::addnotify(LocalNode* l, const LocalPath&)
 {
-#ifdef ENABLE_SYNC
-    if (!l->parent)
-    {
-        localrootnode = l;
-    }
-#endif
 }
 
 fsfp_t WinDirNotify::fsfingerprint() const
@@ -1331,6 +1332,7 @@ fsfp_t WinDirNotify::fsfingerprint() const
 #endif
 }
 
+
 bool WinDirNotify::fsstableids() const
 {
 #ifdef WINDOWS_PHONE
@@ -1349,6 +1351,7 @@ bool WinDirNotify::fsstableids() const
         }
     }
     LOG_err << "Failed to get filesystem type. Error code: " << GetLastError();
+    assert(false);
     return true;
 }
 
@@ -1554,7 +1557,9 @@ void WinDirNotify::notifierThreadFunction()
     LOG_debug << "Filesystem notify thread stopped";
 }
 
-WinDirNotify::WinDirNotify(LocalPath& localbasepath, const LocalPath& ignore, WinFileSystemAccess* owner, Waiter* waiter) : DirNotify(localbasepath, ignore)
+WinDirNotify::WinDirNotify(const LocalPath& localbasepathParam, const LocalPath& ignore, WinFileSystemAccess* owner, Waiter* waiter, LocalNode* syncroot)
+    : DirNotify(localbasepathParam, ignore, syncroot->sync)
+    , localrootnode(syncroot)
 {
     fsaccess = owner;
     fsaccess->dirnotifys.insert(this);
@@ -1579,7 +1584,7 @@ WinDirNotify::WinDirNotify(LocalPath& localbasepath, const LocalPath& ignore, Wi
     mOverlappedEnabled = false;
     mOverlappedExit = false;
 
-    ScopedLengthRestore restoreLocalbasePath(localbasepath);
+    LocalPath localbasepath(localbasepathParam);
     sanitizedriveletter(localbasepath.localpath);
 
     // ReadDirectoryChangesW: If you opened the file using the short name, you can receive change notifications for the short name.  (so make sure it's a long name)
@@ -1661,6 +1666,7 @@ WinDirNotify::~WinDirNotify()
     }
 
 }
+#endif   // ENABLE_SYNC
 
 std::unique_ptr<FileAccess> WinFileSystemAccess::newfileaccess(bool followSymLinks)
 {
@@ -1723,10 +1729,12 @@ DirAccess* WinFileSystemAccess::newdiraccess()
     return new WinDirAccess();
 }
 
-DirNotify* WinFileSystemAccess::newdirnotify(LocalPath& localpath, LocalPath& ignore, Waiter* waiter)
+#ifdef ENABLE_SYNC
+DirNotify* WinFileSystemAccess::newdirnotify(const LocalPath& localpath, const LocalPath& ignore, Waiter* waiter, LocalNode* syncroot)
 {
-    return new WinDirNotify(localpath, ignore, this, waiter);
+    return new WinDirNotify(localpath, ignore, this, waiter, syncroot);
 }
+#endif
 
 bool WinFileSystemAccess::issyncsupported(const LocalPath& localpathArg, bool& isnetwork, SyncError& syncError, SyncWarning& syncWarning)
 {
@@ -1887,4 +1895,37 @@ WinDirAccess::~WinDirAccess()
         FindClose(hFind);
     }
 }
+
+bool isReservedName(const string& name, nodetype_t type)
+{
+    if (name.empty()) return false;
+
+    if (type == FOLDERNODE && name.back() == '.') return true;
+
+    if (name.size() == 3)
+    {
+        static const string reserved[] = {"AUX", "CON", "NUL", "PRN"};
+
+        for (auto& r : reserved)
+        {
+            if (!_stricmp(name.c_str(), r.c_str())) return true;
+        }
+
+        return false;
+    }
+
+    if (name.size() != 4) return false;
+
+    if (!std::isdigit(name.back())) return false;
+
+    static const string reserved[] = {"COM", "LPT"};
+
+    for (auto& r : reserved)
+    {
+        if (!_strnicmp(name.c_str(), r.c_str(), 3)) return true;
+    }
+
+    return false;
+}
+
 } // namespace

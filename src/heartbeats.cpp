@@ -163,65 +163,34 @@ void HeartBeatSyncInfo::updateStatus(UnifiedSync& us)
 
 #endif
 
-////////////// BackupInfo ////////////////
-
-BackupInfo::BackupInfo(BackupType type, string backupName, LocalPath localFolder, handle megaHandle, int state, int substate, std::string extra)
-    : mType(type)
-    , mBackupName(backupName)
-    , mLocalFolder(localFolder)
-    , mMegaHandle(megaHandle)
-    , mState(state)
-    , mSubState(substate)
-    , mExtra(extra)
-{
-
-}
-
-BackupType BackupInfo::type() const
-{
-    return mType;
-}
-
-string BackupInfo::backupName() const
-{
-    return mBackupName;
-}
-
-LocalPath BackupInfo::localFolder() const
-{
-    return mLocalFolder;
-}
-
-handle BackupInfo::megaHandle() const
-{
-    return mMegaHandle;
-}
-
-int BackupInfo::state() const
-{
-    return mState;
-}
-
-int BackupInfo::subState() const
-{
-    return mSubState;
-}
-
-string BackupInfo::extra() const
-{
-    return mExtra;
-}
 
 #ifdef ENABLE_SYNC
-BackupInfoSync::BackupInfoSync(UnifiedSync& us)
-    : BackupInfo(getSyncType(us.mConfig),
-                     us.mConfig.mName,
-                     us.mConfig.getLocalPath(),
-                     us.mConfig.getRemoteNode(),
-                     getSyncState(us),
-                     getSyncSubstatus(us),
-                     getSyncExtraData(us))
+BackupInfoSync::BackupInfoSync(const SyncConfig& config, const string& device, handle drive, int calculatedState)
 {
+    backupId = config.mBackupId;
+    type = getSyncType(config);
+    backupName = config.mName,
+    nodeHandle = config.getRemoteNode();
+    localFolder = config.getLocalPath();
+    state = calculatedState;
+    subState = config.getError();
+    deviceId = device;
+    driveId = drive;
+}
+
+BackupInfoSync::BackupInfoSync(const UnifiedSync &us)
+{
+    backupId = us.mConfig.mBackupId;
+    type = getSyncType(us.mConfig);
+    backupName = us.mConfig.mName,
+    nodeHandle = us.mConfig.getRemoteNode();
+    localFolder = us.mConfig.getLocalPath();
+    state = BackupInfoSync::getSyncState(us);
+    subState = us.mConfig.getError();
+    deviceId = us.mClient.getDeviceidHash();
+    driveId = BackupInfoSync::getDriveId(us);
+    assert(!(us.mConfig.isBackup() && us.mConfig.isExternal())  // not an external backup...
+           || !ISUNDEF(driveId));  // ... or it must have a valid drive-id
 }
 
 int BackupInfoSync::calculatePauseActiveState(MegaClient *client)
@@ -245,10 +214,10 @@ int BackupInfoSync::calculatePauseActiveState(MegaClient *client)
 }
 
 
-int BackupInfoSync::getSyncState(UnifiedSync& us)
+int BackupInfoSync::getSyncState(const UnifiedSync& us)
 {
     SyncError error = us.mConfig.getError();
-    syncstate_t state = us.mSync ? us.mSync->state : SYNC_FAILED;
+    syncstate_t state = us.mSync ? us.mSync->state() : SYNC_FAILED;
 
     return getSyncState(error, state, &us.mClient);
 }
@@ -300,6 +269,17 @@ int BackupInfoSync::getSyncState(const SyncConfig& config, MegaClient *client)
     }
 }
 
+handle BackupInfoSync::getDriveId(const UnifiedSync &us)
+{
+    const LocalPath& drivePath = us.mConfig.mExternalDrivePath;
+    const auto& fsAccess = *us.mClient.fsaccess;
+    const string& drivePathUtf8 = drivePath.toPath(fsAccess);
+    handle driveId;
+    us.mClient.readDriveId(drivePathUtf8.c_str(), driveId); // It shouldn't happen very often
+
+    return driveId;
+}
+
 BackupType BackupInfoSync::getSyncType(const SyncConfig& config)
 {
     switch (config.getType())
@@ -317,15 +297,7 @@ BackupType BackupInfoSync::getSyncType(const SyncConfig& config)
     }
 }
 
-int BackupInfoSync::getSyncSubstatus(UnifiedSync& us)
-{
-    return us.mConfig.getError();
-}
 
-string BackupInfoSync::getSyncExtraData(UnifiedSync&)
-{
-    return string();
-}
 #endif
 
 ////////////// MegaBackupMonitor ////////////////
@@ -334,62 +306,34 @@ BackupMonitor::BackupMonitor(MegaClient *client)
 {
 }
 
-void BackupMonitor::digestPutResult(handle backupId, UnifiedSync* syncPtr)
-{
-#ifdef ENABLE_SYNC
-    mClient->syncs.forEachUnifiedSync([&](UnifiedSync& us){
-        if (&us == syncPtr)
-        {
-            us.mConfig.setBackupId(backupId);
-            mClient->syncs.saveSyncConfig(us.mConfig);
-        }
-    });
-#endif
-}
-
-void BackupMonitor::updateBackupInfo(handle backupId, const BackupInfo &info)
-{
-    string deviceIdHash = mClient->getDeviceidHash();
-
-    mClient->reqs.add(new CommandBackupPut(mClient,
-                                           backupId,
-                                           info.type(),
-                                           info.megaHandle(),
-                                           info.localFolder().toPath(*mClient->fsaccess).c_str(),
-                                           deviceIdHash.c_str(),
-                                           info.state(),
-                                           info.subState(),
-                                           info.extra().c_str(),
-                                           nullptr));
-}
-
 #ifdef ENABLE_SYNC
 
 void BackupMonitor::updateOrRegisterSync(UnifiedSync& us)
 {
+#ifdef DEBUG
     handle backupId = us.mConfig.getBackupId();
     assert(!ISUNDEF(backupId)); // syncs are registered before adding them
+#endif
 
-    BackupInfoSync currentInfo(us);
-    if (!us.mBackupInfo) // Init this field
+    auto currentInfo = ::mega::make_unique<BackupInfoSync>(us);
+    if (us.mBackupInfo && *currentInfo != *us.mBackupInfo)
     {
-        us.mBackupInfo = ::mega::make_unique<BackupInfoSync>(us);
+        mClient->reqs.add(new CommandBackupPut(mClient, *currentInfo, nullptr));
     }
-    else if (currentInfo != *us.mBackupInfo)
-    {
-        updateBackupInfo(us.mConfig.getBackupId(), currentInfo); //queue update command
-        us.mBackupInfo = ::mega::make_unique<BackupInfoSync>(us);
-    }
+    us.mBackupInfo = move(currentInfo);
 }
 
 bool BackupInfoSync::operator==(const BackupInfoSync& o) const
 {
-    return  mType == o.mType &&
-            mLocalFolder == o.mLocalFolder &&
-            mMegaHandle == o.mMegaHandle &&
-            mState == o.mState &&
-            mSubState == o.mSubState &&
-            mExtra == o.mExtra;
+    return  backupId == o.backupId &&
+            driveId == o.driveId &&
+            type == o.type &&
+            backupName == o.backupName &&
+            nodeHandle == o.nodeHandle &&
+            localFolder == o.localFolder &&
+            deviceId == o.deviceId &&
+            state == o.state &&
+            subState == o.subState;
 }
 
 bool BackupInfoSync::operator!=(const BackupInfoSync &o) const
@@ -456,8 +400,12 @@ void BackupMonitor::beatBackupInfo(UnifiedSync& us)
 void BackupMonitor::beat()
 {
 #ifdef ENABLE_SYNC
+    // Only send heartbeats for enabled active syncs.
     mClient->syncs.forEachUnifiedSync([&](UnifiedSync& us){
-        beatBackupInfo(us);
+        if (us.mSync && us.mConfig.getEnabled())
+        {
+            beatBackupInfo(us);
+        }
     });
 #endif
 }

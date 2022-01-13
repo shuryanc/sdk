@@ -89,23 +89,8 @@ class SyncApp : public MegaApp, public Logger
     void request_error(error e);
 
 #ifdef ENABLE_SYNC
-    void syncupdate_stateconfig(handle backupId) override;
-    void syncupdate_local_folder_addition(Sync*, LocalNode*, const char *) override;
-    void syncupdate_local_folder_deletion(Sync*, LocalNode*) override;
-    void syncupdate_local_file_addition(Sync*, LocalNode*, const char *) override;
-    void syncupdate_local_file_deletion(Sync*, LocalNode*) override;
-    void syncupdate_local_file_change(Sync*, LocalNode*, const char *) override;
-    void syncupdate_local_move(Sync*, LocalNode*, const char*) override;
-    void syncupdate_get(Sync*, Node*, const char*) override;
-    void syncupdate_put(Sync*, LocalNode*, const char*) override;
-    void syncupdate_remote_file_addition(Sync*, Node*) override;
-    void syncupdate_remote_file_deletion(Sync*, Node*) override;
-    void syncupdate_remote_folder_addition(Sync*, Node*) override;
-    void syncupdate_remote_folder_deletion(Sync*, Node*) override;
-    void syncupdate_remote_copy(Sync*, const char*) override;
-    void syncupdate_remote_move(Sync*, Node*, Node*) override;
-    void syncupdate_remote_rename(Sync* sync, Node* n, const char* prevname) override;
-    void syncupdate_treestate(LocalNode*) override;
+    void syncupdate_stateconfig(const SyncConfig& config) override;
+    void syncupdate_treestate(const SyncConfig& config, const LocalPath& lp, treestate_t ts, nodetype_t) override;
 #endif
 
     Node* nodebypath(const char* ptr, string* user, string* namepart);
@@ -445,7 +430,7 @@ void SyncApp::fetchnodes_result(const Error &e)
             else
             {
 #ifdef ENABLE_SYNC
-                SyncConfig syncConfig(LocalPath::fromPath(local_folder, *client->fsaccess), local_folder, n->nodehandle, remote_folder, 0);
+                SyncConfig syncConfig(LocalPath::fromPath(local_folder, *client->fsaccess), local_folder, NodeHandle().set6byte(n->nodehandle), remote_folder, 0, LocalPath());
                 client->addsync(syncConfig, false,
                                 [](mega::UnifiedSync*, const SyncError& serr, error err) {
                     if (err)
@@ -477,88 +462,11 @@ void SyncApp::request_error(error e)
 }
 
 #ifdef ENABLE_SYNC
-void SyncApp::syncupdate_stateconfig(handle backupId)
+void SyncApp::syncupdate_stateconfig(const SyncConfig &config)
 {
-    LOG_info << "Sync config updated: " << backupId;
+    LOG_info << "Sync config updated: " << config.mBackupId;
 }
 
-// sync update callbacks are for informational purposes only and must not
-// change or delete the sync itself
-void SyncApp::syncupdate_local_folder_addition(Sync*, LocalNode *, const char* path)
-{
-    LOG_info << "Sync - local folder addition detected: " << path;
-}
-
-void SyncApp::syncupdate_local_folder_deletion(Sync*, LocalNode *localNode)
-{
-    LOG_info << "Sync - local folder deletion detected: " << localNode->name;
-}
-
-void SyncApp::syncupdate_local_file_addition(Sync*, LocalNode *, const char* path)
-{
-    LOG_info << "Sync - local file addition detected: " << path;
-}
-
-void SyncApp::syncupdate_local_file_deletion(Sync*, LocalNode *localNode)
-{
-    LOG_info << "Sync - local file deletion detected: " << localNode->name;
-}
-
-void SyncApp::syncupdate_local_file_change(Sync*, LocalNode *, const char* path)
-{
-    LOG_info << "Sync - local file change detected: " << path;
-}
-
-void SyncApp::syncupdate_local_move(Sync*, LocalNode *localNode, const char* path)
-{
-    LOG_info << "Sync - local rename/move " << localNode->name << " -> " << path;
-}
-
-void SyncApp::syncupdate_remote_move(Sync *, Node *n, Node *prevparent)
-{
-    LOG_info << "Sync - remote move " << n->displayname() << ": " << (prevparent ? prevparent->displayname() : "?") <<
-                 " -> " << (n->parent ? n->parent->displayname() : "?");
-}
-
-void SyncApp::syncupdate_remote_rename(Sync *, Node *n, const char *prevname)
-{
-    LOG_info << "Sync - remote rename " << prevname << " -> " << n->displayname();
-}
-
-void SyncApp::syncupdate_remote_folder_addition(Sync *, Node* n)
-{
-    LOG_info << "Sync - remote folder addition detected " << n->displayname();
-}
-
-void SyncApp::syncupdate_remote_file_addition(Sync*, Node* n)
-{
-    LOG_info << "Sync - remote file addition detected " << n->displayname();
-}
-
-void SyncApp::syncupdate_remote_folder_deletion(Sync*, Node* n)
-{
-    LOG_info << "Sync - remote folder deletion detected " << n->displayname();
-}
-
-void SyncApp::syncupdate_remote_file_deletion(Sync*, Node* n)
-{
-    LOG_info << "Sync - remote file deletion detected " << n->displayname();
-}
-
-void SyncApp::syncupdate_get(Sync*, Node *, const char* path)
-{
-    LOG_info << "Sync - requesting file " << path;
-}
-
-void SyncApp::syncupdate_put(Sync*, LocalNode*, const char* path)
-{
-    LOG_info  << "Sync - sending file " << path;
-}
-
-void SyncApp::syncupdate_remote_copy(Sync*, const char* name)
-{
-    LOG_info << "Sync - creating remote file " << name << " by copying existing remote file";
-}
 
 static const char* treestatename(treestate_t ts)
 {
@@ -580,9 +488,9 @@ static const char* treestatename(treestate_t ts)
     return "UNKNOWN";
 }
 
-void SyncApp::syncupdate_treestate(LocalNode* l)
+void SyncApp::syncupdate_treestate(const SyncConfig &config, const LocalPath& lp, treestate_t ts, nodetype_t)
 {
-    LOG_info << "Sync - state change of node " << l->name << " to " << treestatename(l->ts);
+    LOG_info << "Sync - state change of node " << lp.toPath() << " to " << treestatename(ts);
 }
 
 #endif
@@ -591,7 +499,7 @@ int main(int argc, char *argv[])
 #ifndef ENABLE_SYNC
     cerr << "Synchronization features are disabled" << endl;
     return 1;
-#endif
+#else
 
     SyncApp *app;
 
@@ -674,4 +582,5 @@ int main(int argc, char *argv[])
     }
 
     return 0;
+#endif
 }

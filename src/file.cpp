@@ -287,6 +287,7 @@ void File::progress()
 
 void File::completed(Transfer* t, LocalNode* l)
 {
+    assert(!transfer || t == transfer);
     if (t->type == PUT)
     {
         vector<NewNode> newnodes(1);
@@ -331,19 +332,16 @@ void File::completed(Transfer* t, LocalNode* l)
         if (targetuser.size())
         {
             // drop file into targetuser's inbox
-            int creqtag = t->client->reqtag;
-            t->client->reqtag = tag;
-            t->client->putnodes(targetuser.c_str(), move(newnodes));
-            t->client->reqtag = creqtag;
+            t->client->putnodes(targetuser.c_str(), move(newnodes), tag);
         }
         else
         {
-            handle th = h.as8byte();
+            NodeHandle th = h;
 
             // inaccessible target folder - use //bin instead
-            if (!t->client->nodebyhandle(th))
+            if (!t->client->nodeByHandle(th))
             {
-                th = t->client->rootnodes[RUBBISHNODE - ROOTNODE];
+                th.set6byte(t->client->rootnodes[RUBBISHNODE - ROOTNODE]);
             }
 #ifdef ENABLE_SYNC
             if (l)
@@ -367,18 +365,20 @@ void File::completed(Transfer* t, LocalNode* l)
 #endif
             if (!t->client->versions_disabled && ISUNDEF(newnode->ovhandle))
             {
-                newnode->ovhandle = t->client->getovhandle(t->client->nodebyhandle(th), &name);
+                newnode->ovhandle = t->client->getovhandle(t->client->nodeByHandle(th), &name);
             }
 
             t->client->reqs.add(new CommandPutNodes(t->client,
-                                                                  th, NULL,
-                                                                  move(newnodes),
-                                                                  tag,
+                                                    th, NULL,
+                                                    move(newnodes),
+                                                    tag,
 #ifdef ENABLE_SYNC
-                                                                  l ? PUTNODES_SYNC : PUTNODES_APP));
+                                                    l ? PUTNODES_SYNC : PUTNODES_APP,
 #else
-                                                                  PUTNODES_APP));
+                                                    PUTNODES_APP,
 #endif
+                                                    nullptr,
+                                                    nullptr));
         }
     }
 }
@@ -394,22 +394,7 @@ bool File::failed(error e)
 {
     if (e == API_EKEY)
     {
-        if (!transfer->hascurrentmetamac)
-        {
-            // several integrity check errors uploading chunks
-            return transfer->failcount < 1;
-        }
-
-        if (transfer->hasprevmetamac && transfer->prevmetamac == transfer->currentmetamac)
-        {
-            // integrity check failed after download, two times with the same value
-            return false;
-        }
-
-        // integrity check failed once, try again
-        transfer->prevmetamac = transfer->currentmetamac;
-        transfer->hasprevmetamac = true;
-        return transfer->failcount < 16;
+        return false; // mac error; do not retry
     }
 
     return  // Non fatal errors, up to 16 retries
@@ -442,6 +427,15 @@ void File::displayname(string* dname)
             *dname = "DELETED/UNAVAILABLE";
         }
     }
+}
+
+string File::displayname()
+{
+    string result;
+
+    displayname(&result);
+
+    return result;
 }
 
 #ifdef ENABLE_SYNC

@@ -64,7 +64,6 @@ Transfer::Transfer(MegaClient* cclient, direction_t ctype)
     client = cclient;
     size = 0;
     failcount = 0;
-    uploadhandle = 0;
     minfa = 0;
     pos = 0;
     ctriv = 0;
@@ -73,8 +72,6 @@ Transfer::Transfer(MegaClient* cclient, direction_t ctype)
     slot = NULL;
     asyncopencontext = NULL;
     progresscompleted = 0;
-    hasprevmetamac = false;
-    hascurrentmetamac = false;
     finished = false;
     lastaccesstime = 0;
     ultoken = NULL;
@@ -366,8 +363,7 @@ Transfer *Transfer::unserialize(MegaClient *client, string *d, transfer_map* tra
 
 SymmCipher *Transfer::transfercipher()
 {
-    client->tmptransfercipher.setkey(transferkey.data());
-    return &client->tmptransfercipher;
+    return client->getRecycledTemporaryTransferCipher(transferkey.data());
 }
 
 void Transfer::removeTransferFile(error e, File* f, DBTableTransactionCommitter* committer)
@@ -453,7 +449,7 @@ void Transfer::failed(const Error& e, DBTableTransactionCommitter& committer, ds
 #ifdef ENABLE_SYNC
             if (f->syncxfer)
             {
-                client->disableSyncContainingNode(f->h.as8byte(), FOREIGN_TARGET_OVERSTORAGE, true);  // still try to resume at startup
+                client->disableSyncContainingNode(f->h, FOREIGN_TARGET_OVERSTORAGE, false);
             }
 #endif
             removeTransferFile(API_EOVERQUOTA, f, &committer);
@@ -535,7 +531,7 @@ void Transfer::failed(const Error& e, DBTableTransactionCommitter& committer, ds
 
             if (e == API_EBUSINESSPASTDUE && !alreadyDisabled)
             {
-                client->syncs.disableSyncs(BUSINESS_EXPIRED, true); // still try to resume on start
+                client->syncs.disableSyncs(BUSINESS_EXPIRED, false);
                 alreadyDisabled = true;
             }
 #endif
@@ -585,7 +581,7 @@ void Transfer::addAnyMissingMediaFileAttributes(Node* node, /*const*/ LocalPath&
             }
             else
             {
-                client->mediaFileInfo.sendOrQueueMediaPropertiesFileAttributesForExistingFile(vp, attrKey, client, node->nodehandle);
+                client->mediaFileInfo.sendOrQueueMediaPropertiesFileAttributesForExistingFile(vp, attrKey, client, node->nodeHandle());
             }
         }
     }
@@ -724,8 +720,9 @@ void Transfer::complete(DBTableTransactionCommitter& committer)
                             LOG_debug << "Fixing fingerprint";
                             *(FileFingerprint*)n = fingerprint;
 
-                            n->serializefingerprint(&n->attrs.map['c']);
-                            client->setattr(n);
+                            attr_map attrUpdate;
+                            n->serializefingerprint(&attrUpdate['c']);
+                            client->setattr(n, std::move(attrUpdate), client->reqtag, nullptr, nullptr);
                         }
                     }
                 }
@@ -882,7 +879,7 @@ void Transfer::complete(DBTableTransactionCommitter& committer)
 
                                 if (missingattr)
                                 {
-                                    client->gfx->gendimensionsputfa(NULL, localname, n->nodehandle, n->nodecipher(), missingattr);
+                                    client->gfx->gendimensionsputfa(NULL, localname, NodeOrUploadHandle(n->nodeHandle()), n->nodecipher(), missingattr);
                                 }
 
                                 addAnyMissingMediaFileAttributes(n, localname);
@@ -893,6 +890,17 @@ void Transfer::complete(DBTableTransactionCommitter& committer)
 
                 if (success || !transient_error)
                 {
+                    if (auto node = client->nodeByHandle((*it)->h))
+                    {
+                        auto path = (*it)->localname;
+                        auto type = isFilenameAnomaly(path, node);
+
+                        if (type != FILENAME_ANOMALY_NONE)
+                        {
+                            client->filenameAnomalyDetected(type, path.toPath(), node->displaypath());
+                        }
+                    }
+
                     if (success)
                     {
                         // prevent deletion of associated Transfer object in completed()
@@ -987,11 +995,28 @@ void Transfer::complete(DBTableTransactionCommitter& committer)
                 synclocalpath = ll->getLocalPath();
                 localpath = &synclocalpath;
             }
-            else
+#endif
+            if (auto node = client->nodeByHandle(f->h))
+            {
+                auto type = isFilenameAnomaly(*localpath, f->name);
+
+                if (type != FILENAME_ANOMALY_NONE)
+                {
+                    // Construct remote path for reporting.
+                    ostringstream remotepath;
+
+                    remotepath << node->displaypath()
+                               << (node->parent ? "/" : "")
+                               << f->name;
+
+                    client->filenameAnomalyDetected(type, localpath->toPath(), remotepath.str());
+                }
+            }
+
+            if (localpath == &f->localname)
             {
                 LOG_debug << "Verifying regular upload";
             }
-#endif
 
             auto fa = client->fsaccess->newfileaccess();
             bool isOpen = fa->fopen(*localpath);
@@ -1928,7 +1953,8 @@ bool TransferList::getIterator(Transfer *transfer, transfer_list::iterator& it, 
     return false;
 }
 
-std::array<vector<Transfer*>, 6> TransferList::nexttransfers(std::function<bool(Transfer*)>& continuefunction)
+std::array<vector<Transfer*>, 6> TransferList::nexttransfers(std::function<bool(Transfer*)>& continuefunction,
+                                                             std::function<bool(direction_t)>& directionContinuefunction)
 {
     std::array<vector<Transfer*>, 6> chosenTransfers;
 
@@ -1938,6 +1964,9 @@ std::array<vector<Transfer*>, 6> TransferList::nexttransfers(std::function<bool(
     {
         for (Transfer *transfer : transfers[direction])
         {
+            // don't traverse the whole list if we already have as many as we are going to get
+            if (!directionContinuefunction(direction)) break;
+
             bool continueLarge = true;
             bool continueSmall = true;
 

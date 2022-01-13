@@ -49,12 +49,41 @@ string toNodeHandle(NodeHandle nodeHandle)
 {
     return toNodeHandle(nodeHandle.as8byte());
 }
+
 string toHandle(handle h)
 {
     char base64Handle[14];
     Base64::btoa((byte*)&(h), sizeof h, base64Handle);
     return string(base64Handle);
 }
+
+std::ostream& operator<<(std::ostream& s, NodeHandle h)
+{
+    return s << toNodeHandle(h);
+}
+
+SimpleLogger& operator<<(SimpleLogger& s, NodeHandle h)
+{
+    return s << toNodeHandle(h);
+}
+
+SimpleLogger& operator<<(SimpleLogger& s, UploadHandle h)
+{
+    return s << toHandle(h.h);
+}
+
+SimpleLogger& operator<<(SimpleLogger& s, NodeOrUploadHandle h)
+{
+    if (h.isNodeHandle())
+    {
+        return s << "nh:" << h.nodeHandle();
+    }
+    else
+    {
+        return s << "uh:" << h.uploadHandle();
+    }
+}
+
 
 string backupTypeToStr(BackupType type)
 {
@@ -1372,9 +1401,14 @@ string* TLVstore::tlvRecordsToContainer()
     return result;
 }
 
-std::string TLVstore::get(string type) const
+bool TLVstore::get(string type, string& value) const
 {
-    return tlv.at(type);
+    auto it = tlv.find(type);
+    if (it == tlv.cend())
+        return false;
+
+    value = it->second;
+    return true;
 }
 
 const TLV_map * TLVstore::getMap() const
@@ -1390,11 +1424,6 @@ vector<string> *TLVstore::getKeys() const
         keys->push_back(it->first);
     }
     return keys;
-}
-
-bool TLVstore::find(string type) const
-{
-    return (tlv.find(type) != tlv.end());
 }
 
 void TLVstore::set(string type, string value)
@@ -2262,8 +2291,9 @@ void NodeCounter::operator -= (const NodeCounter& o)
 }
 
 
-CacheableStatus::CacheableStatus(int64_t type, int64_t value)
-    : mType{type}, mValue{value}
+CacheableStatus::CacheableStatus(mega::CacheableStatus::Type type, int64_t value)
+    : mType(type)
+    , mValue(value)
 { }
 
 
@@ -2276,11 +2306,11 @@ bool CacheableStatus::serialize(std::string* data)
 
 CacheableStatus* CacheableStatus::unserialize(class MegaClient *client, const std::string& data)
 {
-    int64_t type;
+    int64_t typeBuf;
     int64_t value;
 
-    CacheableReader reader{data};
-    if (!reader.unserializei64(type))
+    CacheableReader reader(data);
+    if (!reader.unserializei64(typeBuf))
     {
         return nullptr;
     }
@@ -2289,6 +2319,7 @@ CacheableStatus* CacheableStatus::unserialize(class MegaClient *client, const st
         return nullptr;
     }
 
+    CacheableStatus::Type type = static_cast<CacheableStatus::Type>(typeBuf);
     client->mCachedStatus.loadCachedStatus(type, value);
     return client->mCachedStatus.getPtr(type);
 }
@@ -2306,7 +2337,7 @@ int64_t CacheableStatus::value() const
     return mValue;
 }
 
-int64_t CacheableStatus::type() const
+CacheableStatus::Type CacheableStatus::type() const
 {
     return mType;
 }
@@ -2314,6 +2345,30 @@ int64_t CacheableStatus::type() const
 void CacheableStatus::setValue(const int64_t value)
 {
     mValue = value;
+}
+
+std::string CacheableStatus::typeToStr()
+{
+    return CacheableStatus::typeToStr(mType);
+}
+
+std::string CacheableStatus::typeToStr(CacheableStatus::Type type)
+{
+    switch (type)
+    {
+    case STATUS_UNKNOWN:
+        return "unknown";
+    case STATUS_STORAGE:
+        return "storage";
+    case STATUS_BUSINESS:
+        return "business";
+    case STATUS_BLOCKED:
+        return "blocked";
+    case STATUS_PRO_LEVEL:
+        return "pro-level";
+    default:
+        return "undefined";
+    }
 }
 
 std::pair<bool, int64_t> generateMetaMac(SymmCipher &cipher, FileAccess &ifAccess, const int64_t iv)
@@ -2440,6 +2495,52 @@ void MegaClientAsyncQueue::asyncThreadLoop()
 bool islchex(const int c)
 {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+}
+
+std::string getSafeUrl(const std::string &posturl)
+{
+    string safeurl = posturl;
+    size_t sid = safeurl.find("sid=");
+    if (sid != string::npos)
+    {
+        sid += 4;
+        size_t end = safeurl.find("&", sid);
+        if (end == string::npos)
+        {
+            end = safeurl.size();
+        }
+        memset((char *)safeurl.data() + sid, 'X', end - sid);
+    }
+    size_t authKey = safeurl.find("n=");
+    if (authKey != string::npos)
+    {
+        authKey += 2/*n=*/ + 8/*public handle*/;
+        size_t end = safeurl.find("&", authKey);
+        if (end == string::npos)
+        {
+            end = safeurl.size();
+        }
+        memset((char *)safeurl.data() + authKey, 'X', end - authKey);
+    }
+    return safeurl;
+}
+
+UploadHandle UploadHandle::next()
+{
+    do
+    {
+        // Since we start with UNDEF, the first update would overwrite the whole handle and at least 1 byte further, causing data corruption
+        if (h == UNDEF) h = 0;
+
+        byte* ptr = (byte*)(&h + 1);
+
+        while (!++*--ptr);
+    }
+    while ((h & 0xFFFF000000000000) == 0 || // if the top two bytes were all 0 then it could clash with NodeHandles
+            h == UNDEF);
+
+
+    return *this;
 }
 
 } // namespace

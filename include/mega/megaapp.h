@@ -47,7 +47,7 @@ struct MEGA_API MegaApp
     virtual void logout_result(error) { }
 
     // user data result
-    virtual void userdata_result(string*, string*, string*, error) { }
+    virtual void userdata_result(string*, string*, string*, Error) { }
 
     // user public key retrieval result
     virtual void pubkey_result(User *) { }
@@ -79,12 +79,6 @@ struct MEGA_API MegaApp
 
     // sessionid is undef if all sessions except the current were killed
     virtual void sessions_killed(handle /*sessionid*/, error) { }
-
-    // node attribute update failed (not invoked unless error != API_OK)
-    virtual void setattr_result(handle, error) { }
-
-    // move node failed (not invoked unless error != API_OK)
-    virtual void rename_result(handle, error) { }
 
     // node deletion failed (not invoked unless error != API_OK)
     virtual void unlink_result(handle, error) { }
@@ -128,10 +122,6 @@ struct MEGA_API MegaApp
     // node addition has failed
     virtual void putnodes_result(const Error&, targettype_t, vector<NewNode>&, bool targetOverride = false) { }
 
-    // share update result
-    virtual void share_result(error, bool writable = false) { }
-    virtual void share_result(int, error, bool writable = false) { }
-
     // outgoing pending contact result
     virtual void setpcr_result(handle, error, opcactions_t) { }
     // incoming pending contact result
@@ -148,7 +138,10 @@ struct MEGA_API MegaApp
     virtual void putfa_result(handle, fatype, error) { }
 
     // purchase transactions
-    virtual void enumeratequotaitems_result(unsigned, handle, unsigned, int, int, unsigned, unsigned, unsigned, const char*, const char*, const char*, const char*) { }
+    virtual void enumeratequotaitems_result(unsigned, handle, unsigned, int, int, unsigned, unsigned,
+                                            unsigned, unsigned, const char*, const char*, const char*,
+                                            unique_ptr<BusinessPlan>) { }
+    virtual void enumeratequotaitems_result(unique_ptr<CurrencyData>) {}
     virtual void enumeratequotaitems_result(error) { }
     virtual void additem_result(error) { }
     virtual void checkout_result(const char*, error) { }
@@ -179,20 +172,9 @@ struct MEGA_API MegaApp
 
     virtual void getuseremail_result(string *, error) { }
 
-    // file node export result
-    virtual void exportnode_result(error) { }
-    virtual void exportnode_result(handle, handle) { }
-
     // exported link access result
     virtual void openfilelink_result(const Error&) { }
     virtual void openfilelink_result(handle, const byte*, m_off_t, string*, string*, int) { }
-
-    // node opening result
-    virtual void checkfile_result(handle, const Error&) { }
-    virtual void checkfile_result(handle, error, byte*, m_off_t, m_time_t, m_time_t, string*, string*, string*) { }
-
-    // URL suitable for iOS (or other system) background upload feature
-    virtual void backgrounduploadurl_result(error, string*) { }
 
     // pread result
     virtual dstime pread_failure(const Error&, int, void*, dstime) { return ~(dstime)0; }
@@ -268,9 +250,6 @@ struct MEGA_API MegaApp
     // get mega-achievements
     virtual void getmegaachievements_result(AchievementsDetails*, error) {}
 
-    // get welcome pdf
-    virtual void getwelcomepdf_result(handle, string*, error) {}
-
     // codec-mappings received
     virtual void mediadetection_ready() {}
 
@@ -291,26 +270,11 @@ struct MEGA_API MegaApp
     virtual void transfer_complete(Transfer*) { }
 
     // sync status updates and events
-    virtual void syncupdate_stateconfig(handle) { }
-    virtual void syncupdate_active(handle, bool) { }
+    virtual void syncupdate_stateconfig(const SyncConfig& config) { }
+    virtual void syncupdate_active(const SyncConfig& config, bool) { }
     virtual void syncupdate_scanning(bool) { }
-    virtual void syncupdate_local_folder_addition(Sync*, LocalNode*, const char*) { }
-    virtual void syncupdate_local_folder_deletion(Sync*, LocalNode*) { }
-    virtual void syncupdate_local_file_addition(Sync*, LocalNode*, const char*) { }
-    virtual void syncupdate_local_file_deletion(Sync*, LocalNode*) { }
-    virtual void syncupdate_local_file_change(Sync*, LocalNode*, const char*) { }
-    virtual void syncupdate_local_move(Sync*, LocalNode*, const char*) { }
     virtual void syncupdate_local_lockretry(bool) { }
-    virtual void syncupdate_get(Sync*, Node*, const char*) { }
-    virtual void syncupdate_put(Sync*, LocalNode*, const char*) { }
-    virtual void syncupdate_remote_file_addition(Sync*, Node*) { }
-    virtual void syncupdate_remote_file_deletion(Sync*, Node*) { }
-    virtual void syncupdate_remote_folder_addition(Sync*, Node*) { }
-    virtual void syncupdate_remote_folder_deletion(Sync*, Node*) { }
-    virtual void syncupdate_remote_copy(Sync*, const char*) { }
-    virtual void syncupdate_remote_move(Sync*, Node*, Node*) { }
-    virtual void syncupdate_remote_rename(Sync*, Node*, const char*) { }
-    virtual void syncupdate_treestate(LocalNode*) { }
+    virtual void syncupdate_treestate(const SyncConfig &, const LocalPath&, treestate_t, nodetype_t) { }
 
     // sync filename filter
     virtual bool sync_syncable(Sync*, const char*, LocalPath&, Node*)
@@ -333,10 +297,10 @@ struct MEGA_API MegaApp
     virtual void syncs_disabled(SyncError) { }
 
     // after an attempt to auto-resume a cache sync
-    virtual void sync_auto_resume_result(const UnifiedSync& s, bool attempted) { }
+    virtual void sync_auto_resume_result(const SyncConfig& config, bool attempted, bool hadAnError) { }
 
     // after a sync has been removed
-    virtual void sync_removed(handle backupId) { }
+    virtual void sync_removed(const SyncConfig& config) { }
 
     // suggest reload due to possible race condition with other clients
     virtual void reload(const char*) { }
@@ -413,7 +377,6 @@ struct MEGA_API MegaApp
     virtual void getmiscflags_result(error) { }
 
     virtual void backupput_result(const Error&, handle /*backup id*/) { }
-    virtual void backupupdate_result(const Error&, handle /*backup id*/) { }
     virtual void backupremove_result(const Error&, handle /*backup id*/) { }
 
     virtual void getbanners_result(error) { }
@@ -422,6 +385,9 @@ struct MEGA_API MegaApp
     virtual void dismissbanner_result(error) { }
 
     virtual ~MegaApp() { }
+
+    // External drive notifications
+    virtual void drive_presence_changed(bool appeared, const LocalPath& driveRoot) { }
 };
 } // namespace
 

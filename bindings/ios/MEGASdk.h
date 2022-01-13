@@ -270,6 +270,14 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
     BackupHeartbeatStatusUnknown = 5
 };
 
+typedef NS_ENUM(NSInteger, AccountActionType) {
+    AccountActionTypeCreate = 0,
+    AccountActionTypeResume = 1,
+    AccountActionTypeCancel = 2,
+    AccountActionTypeCreateEphemeralPlusPlus = 3,
+    AccountActionTypeResumeEphemeralPlusPlus = 4,
+};
+
 /**
  * @brief Allows to control a MEGA account or a public folder.
  *
@@ -391,15 +399,13 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * Function related to statistics will be reviewed in future updates to
  * provide more data and avoid race conditions. They could change or be removed in the current form.
  */
-@property (readonly, nonatomic) NSNumber *totalsDownloadBytes __attribute__((deprecated("They could change or be removed in the current form.")));
+@property (readonly, nonatomic) NSNumber *totalsDownloadBytes;
 
 /**
  * @brief Total downloaded bytes since the creation of the MEGASdk object.
  *
- * @deprecated Property related to statistics will be reviewed in future updates to
- * provide more data and avoid race conditions. They could change or be removed in the current form.
  */
-@property (readonly, nonatomic) NSNumber *totalsDownloadedBytes __attribute__((deprecated("They could change or be removed in the current form.")));
+@property (readonly, nonatomic) NSNumber *totalsDownloadedBytes;
 
 /**
  * Get the total bytes of started uploads
@@ -412,16 +418,13 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * provide more data and avoid race conditions. They could change or be removed in the current form.
  *
  */
-@property (readonly, nonatomic) NSNumber *totalsUploadBytes __attribute__((deprecated("They could change or be removed in the current form.")));
+@property (readonly, nonatomic) NSNumber *totalsUploadBytes;
 
 /**
  * @brief Total uploaded bytes since the creation of the MEGASdk object.
  *
- * @deprecated Property related to statistics will be reviewed in future updates to
- * provide more data and avoid race conditions. They could change or be removed in the current form.
- *
  */
-@property (readonly, nonatomic) NSNumber *totalsUploadedBytes __attribute__((deprecated("They could change or be removed in the current form.")));
+@property (readonly, nonatomic) NSNumber *totalsUploadedBytes;
 
 /**
  * @brief The total number of nodes in the account
@@ -561,6 +564,11 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  *
  */
 - (nullable instancetype)initWithAppKey:(NSString *)appKey userAgent:(nullable NSString *)userAgent basePath:(nullable NSString *)basePath;
+
+/**
+ * @brief Delete MegaApi object
+ */
+- (void)deleteMegaApi;
 
 #pragma mark - Add and remove delegates
 
@@ -1281,10 +1289,46 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
 - (nullable NSString *)sequenceNumber;
 
 /**
+ * @brief Get an authentication token that can be used to identify the user account
+ *
+ * If this MEGASdk object is not logged into an account, this function will return nil
+ *
+ * The value returned by this function can be used in other instances of MEGASdk
+ * thanks to the function [MEGASdk setAccountAuth].
+ *
+ * @return Authentication token
+ */
+- (nullable NSString *)accountAuth;
+
+/**
+ * @brief Use an authentication token to identify an account while accessing public folders
+ *
+ * This function is useful to preserve the PRO status when a public folder is being
+ * used. The identifier will be sent in all API requests made after the call to this function.
+ *
+ * To stop using the current authentication token, it's needed to explicitly call
+ * this function with nil as parameter. Otherwise, the value set would continue
+ * being used despite this MEGASdk object is logged in or logged out.
+ *
+ * It's recommended to call this function before the usage of [MEGASdk loginToFolder]
+ *
+ * @param auth Authentication token used to identify the account of the user.
+ * You can get it using [MEGASdk accountAuth] with an instance of MEGASdk logged into
+ * an account.
+ */
+- (void)setAccountAuth:(nullable NSString *)accountAuth;
+
+/**
  * @brief Check if the MEGASdk object is logged in.
  * @return 0 if not logged in, Otherwise, a number >= 0.
  */
 - (NSInteger)isLoggedIn;
+
+/**
+ * @brief Check if we are logged in into an Ephemeral account ++
+ * @return true if logged into an Ephemeral account ++, Otherwise return false
+ */
+- (BOOL)isEphemeralPlusPlus;
 
 /**
  * @brief Fetch the filesystem in MEGA.
@@ -4486,6 +4530,7 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * Valid data in the MEGARequest object received in onRequestFinish when the error code
  * is MEGAErrorTypeApiOk:
  * - [MEGARequest pricing] - MEGAPricing object with all pricing plans
+ * - [MEGARequest currency] - MEGACurrency object with currency data related to prices
  *
  * @param delegate Delegate to track this request.
  *
@@ -4504,6 +4549,7 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * Valid data in the MEGARequest object received in onRequestFinish when the error code
  * is MEGAErrorTypeApiOk:
  * - [MEGARequest pricing] - MEGAPricing object with all pricing plans
+ * - [MEGARequest currency] - MEGACurrency object with currency data related to prices 
  *
  * @see [MEGASdk getPaymentIdForProductHandle:].
  */
@@ -4973,6 +5019,8 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  */
 - (void)isMasterKeyExported;
 
+#ifdef ENABLE_CHAT
+
 /**
  * @brief Enable or disable the generation of rich previews
  *
@@ -5146,6 +5194,8 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * the application has to answer before send a message of this type.
  */
 - (void)isGeolocationEnabled;
+
+#endif
 
 /**
  * @brief Set My Chat Files target folder.
@@ -6147,20 +6197,14 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * @brief Reset the number of total downloads
  * This function resets the number returned by [MEGASdk totalDownloads]
  *
- * @deprecated Function related to statistics will be reviewed in future updates to
- * provide more data and avoid race conditions. They could change or be removed in the current form.
- *
  */
-- (void)resetTotalDownloads __attribute__((deprecated("They could change or be removed in the current form.")));
+- (void)resetTotalDownloads;
 
 /**
  * @brief Reset the number of total uploads
  * This function resets the number returned by [MEGASdk totalUploads]
- *
- * @deprecated Function related to statistics will be reviewed in future updates to
- * provide more data and avoid race conditions. They could change or be removed in the current form.
  */
-- (void)resetTotalUploads __attribute__((deprecated("They could change or be removed in the current form.")));
+- (void)resetTotalUploads;
 
 /**
  * @brief Cancel a transfer.
@@ -6486,91 +6530,6 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * @param pause YES to pause the transfer or NO to resume it
  */
 - (void)pauseTransferByTag:(NSInteger)transferTag pause:(BOOL)pause;
-
-/**
- * @brief Enable the resumption of transfers
- *
- * This function enables the cache of transfers, so they can be resumed later.
- * Additionally, if a previous cache already exists (from previous executions),
- * then this function also resumes the existing cached transfers.
- *
- * @note Cached downloads expire after 10 days since the last time they were active.
- * @note Cached uploads expire after 24 hours since the last time they were active.
- * @note Cached transfers related to files that have been modified since they were
- * added to the cache are discarded, since the file has changed.
- *
- * A log in or a log out automatically disables this feature.
- *
- * When the MEGASdk object is logged in, the cache of transfers is identified
- * and protected using the session and the recovery key, so transfers won't
- * be resumable using a different session or a different account. The
- * recommended way of using this function to resume transfers for an account
- * is calling it in the callback onRequestFinish related to [MEGASdk fetchNodes]
- *
- * When the MEGASdk object is not logged in, it's still possible to use this
- * feature. However, since there isn't any available data to identify
- * and protect the cache, a default identifier and key are used. To improve
- * the protection of the transfer cache and allow the usage of this feature
- * with several non logged in instances of MEGASdk at once without clashes,
- * it's possible to set a custom identifier for the transfer cache in the
- * optional parameter of this function. If that parameter is used, the
- * encryption key for the transfer cache will be derived from it.
- *
- * @param loggedOutId Identifier for a non logged in instance of MEGASdk.
- * It doesn't have any effect if MEGASdk is logged in.
- */
-- (void)enableTransferResumption:(NSString *)loggedOutId;
-
-/**
- * @brief Enable the resumption of transfers
- *
- * This function enables the cache of transfers, so they can be resumed later.
- * Additionally, if a previous cache already exists (from previous executions),
- * then this function also resumes the existing cached transfers.
- *
- * @note Cached downloads expire after 10 days since the last time they were active.
- * @note Cached uploads expire after 24 hours since the last time they were active.
- * @note Cached transfers related to files that have been modified since they were
- * added to the cache are discarded, since the file has changed.
- *
- * A log in or a log out automatically disables this feature.
- *
- * When the MEGASdk object is logged in, the cache of transfers is identified
- * and protected using the session and the recovery key, so transfers won't
- * be resumable using a different session or a different account. The
- * recommended way of using this function to resume transfers for an account
- * is calling it in the callback onRequestFinish related to [MEGASdk fetchNodes]
- *
- * When the MEGASdk object is not logged in, it's still possible to use this
- * feature. However, since there isn't any available data to identify
- * and protect the cache, a default identifier and key are used. To improve
- * the protection of the transfer cache and allow the usage of this feature
- * with several non logged in instances of MEGASdk at once without clashes,
- * it's possible to set a custom identifier for the transfer cache in the
- * optional parameter of this function. If that parameter is used, the
- * encryption key for the transfer cache will be derived from it.
- */
-- (void)enableTransferResumption;
-
-/**
- * @brief Disable the resumption of transfers
- *
- * This function disables the resumption of transfers and also deletes
- * the transfer cache if it exists. See also [MEGASdk enableTransferResumption:].
- *
- * @param loggedOutId Identifier for a non logged in instance of MEGASdk.
- * It doesn't have any effect if MEGASdk is logged in.
- */
-- (void)disableTransferResumption:(NSString *)loggedOutId;
-
-/**
- * @brief Disable the resumption of transfers
- *
- * This function disables the resumption of transfers and also deletes
- * the transfer cache if it exists. See also [MEGASdk enableTransferResumption:].
- *
- */
-- (void)disableTransferResumption;
 
 /**
  * @brief Pause/resume all transfers in one direction (uploads or downloads)
@@ -7154,6 +7113,22 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * @return List of MEGAShare objects.
  */
 - (MEGAShareList *)outSharesForNode:(MEGANode *)node;
+
+/**
+ * @brief Check if a node belongs to your own cloud
+ * @param handle Node to check
+ * @return YES if it belongs to your own cloud
+ */
+- (BOOL)isPrivateNode:(uint64_t)handle;
+/**
+ * @brief Check if a node does NOT belong to your own cloud
+ *
+ * In example, nodes from incoming shared folders do not belong to your cloud.
+ *
+ * @param handle Node to check
+ * @return YES if it does NOT belong to your own cloud
+ */
+- (BOOL)isForeignNode:(uint64_t)handle;
 
 /**
  * @brief Get a list with all public links
@@ -8341,6 +8316,7 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  */
 + (nullable NSString *)mimeTypeByExtension:(NSString *)extension;
 
+#ifdef ENABLE_CHAT
 /**
  * @brief Register a device token for iOS push notifications
  *
@@ -8396,6 +8372,8 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * @param deviceToken NSString representing the device token to be registered.
  */
 - (void)registeriOSVoIPdeviceToken:(NSString *)deviceToken;
+
+#endif
 
 /**
  * @brief Get the MEGA Achievements of the account logged in
@@ -8475,6 +8453,18 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  *
  */
 - (void)getMegaAchievements;
+
+/**
+  * @brief Catch up with API for pending actionpackets
+  *
+  * The associated request type with this request is MEGARequestTypeCatchup
+  *
+  * When onRequestFinish is called with MEGAErrorTypeApiOk, the SDK is guaranteed to be
+  * up to date (as for the time this function is called).
+  *
+  * @param delegate MEGARequestDelegate to track this request
+  */
+- (void)catchupWithDelegate:(id<MEGARequestDelegate>)delegate;
 
 /**
  * @brief Retrieve basic information about a folder link
@@ -8923,7 +8913,7 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * @param state BackUpState type backup state
  * @param delegate MEGARequestDelegate to track this request
 */
-- (void)updateBackup:(MEGAHandle)backupId backupType:(BackUpType)type targetNode:(MEGANode *)node folderPath:(nullable NSString *)path state:(BackUpState)state delegate:(id<MEGARequestDelegate>)delegate;
+- (void)updateBackup:(MEGAHandle)backupId backupType:(BackUpType)type targetNode:(MEGANode *)node folderPath:(nullable NSString *)path backupName:(NSString *)name state:(BackUpState)state delegate:(id<MEGARequestDelegate>)delegate;
 
 /**
  * @brief Unregister a backup already registered for the Backup Centre
@@ -8967,6 +8957,34 @@ typedef NS_ENUM(NSUInteger, BackupHeartbeatStatus) {
  * @param delegate MEGARequestDelegate to track this request
 */
 - (void)sendBackupHeartbeat:(MEGAHandle)backupId status:(BackupHeartbeatStatus)status progress:(NSInteger)progress pendingUploadCount:(NSUInteger)pendingUploadCount lastActionDate:(NSDate *)lastActionDate lastBackupNode:(MEGANode *)lastBackupNode delegate:(id<MEGARequestDelegate>)delegate;
+
+/**
+ * @brief Returns the name set for this device
+ *
+ * The associated request type with this request is MEGARequestTypeGetAttrUser
+ * Valid data in the request object received on callbacks:
+ * - paramType - Returns the attribute type MEGAUserAttributeDeviceNames
+ *
+ * Valid data in the MEGARequest object received in onRequestFinish when the error code
+ * is MEGAErrorTypeApiOk:
+ * - name - Returns device name.
+ *
+ * @param delegate MEGARequestDelegate to track this request
+ */
+- (void)getDeviceNameWithDelegate:(id<MEGARequestDelegate>)delegate;
+
+/**
+ * @brief Sets device name
+ *
+ * The associated request type with this request is MEGARequestTypeSetAttrUser
+ * Valid data in the MEGARequest object received on callbacks:
+ * - paramType - Returns the attribute type MEGAUserAttributeDeviceNames
+ * - name - Returns device name.
+ *
+ * @param name String with device name
+ * @param delegate MEGARequestDelegate to track this request
+ */
+- (void)setDeviceName:(NSString *)name delegate:(id<MEGARequestDelegate>)delegate;
 
 #pragma mark - Cookie Dialog
 

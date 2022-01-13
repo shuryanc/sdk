@@ -69,7 +69,7 @@ struct MEGA_API NewNode : public NodeCore
     newnodesource_t source = NEW_NODE;
 
     handle ovhandle = UNDEF;
-    handle uploadhandle = UNDEF;
+    UploadHandle uploadhandle;
     byte uploadtoken[UPLOADTOKENLEN]{};
 
     handle syncid = UNDEF;
@@ -137,9 +137,6 @@ struct MEGA_API Node : public NodeCore, FileFingerprint
 
     // follow the parent links all the way to the top
     const Node* firstancestor() const;
-
-    // copy JSON-delimited string
-    static void copystring(string*, const char*);
 
     // try to resolve node key string
     bool applykey();
@@ -261,6 +258,7 @@ struct MEGA_API Node : public NodeCore, FileFingerprint
 
     // check if node is below this node
     bool isbelow(Node*) const;
+    bool isbelow(NodeHandle) const;
 
     // handle of public link for the node
     PublicLink* plink = nullptr;
@@ -361,6 +359,9 @@ struct MEGA_API LocalNode : public File
 
         // checked for missing attributes
         bool checked : 1;
+
+        // set after the cloud node is created
+        bool needsRescan : 1;
     };
 
     // current subtree sync state: current and displayed
@@ -416,6 +417,8 @@ struct MEGA_API LocalNode : public File
     ~LocalNode();
 
     void detach(const bool recreate = false);
+
+    void setSubtreeNeedsRescan(bool includeFiles);
 };
 
 template <> inline NewNode*& crossref_other_ptr_ref<LocalNode, NewNode>(LocalNode* p) { return p->newnode.ptr; }
